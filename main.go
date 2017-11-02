@@ -1,6 +1,8 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
 const (
 	// Build Type
@@ -46,9 +48,9 @@ type TownCenter struct {
 }
 
 type FoodSource struct {
-	Workers []*Worker
+	Name     string
+	Workers  []*Worker
 	Capacity int
-	Remain int
 }
 
 type WoodSource struct {
@@ -56,18 +58,24 @@ type WoodSource struct {
 }
 
 var currentTime = 0
-var idleWorkers []*Worker
+var idleWorkers map[int]*Worker
 var town *TownCenter
 var food, wood, gold = 200, 200, 0
-
-var foodSource0, foodSource1, foodSource2 = 900, 600, 750
+var foodSources []*FoodSource
+var wooSource *WoodSource
 
 func init() {
 	// Start game with 3 workers
 	town = new(TownCenter)
-	idleWorkers = []*Worker{
-		{}, {}, {},
+	idleWorkers = map[int]*Worker{
+		1: {}, 2: {}, 3: {},
 	}
+	foodSources = []*FoodSource{
+		{Capacity: 900, Name: "Food 0"},
+		{Capacity: 600, Name: "Food 1"},
+		{Capacity: 750, Name: "Food 2"},
+	}
+	wooSource = new(WoodSource)
 }
 
 func main() {
@@ -88,7 +96,7 @@ func (t *TownCenter) spawnWorkers() {
 
 	if t.BuildType == WORKER {
 		if t.BuildTime == WORKER_SPAWN_TIME {
-			idleWorkers = append(idleWorkers, &Worker{})
+			idleWorkers[len(idleWorkers)+1] = &Worker{}
 			t.BuildTime = 1
 			t.BuildType = IDLE
 			output("Worker spawned.")
@@ -106,7 +114,7 @@ func (t *TownCenter) spawnWorkers() {
 }
 
 func buildStructures() {
-	if (beCount + 1) * 4 <= len(idleWorkers) + 2 {
+	if (beCount+1)*4 <= len(idleWorkers)+2 {
 		output("BE built.")
 		wood -= beCost
 		beCount++
@@ -134,53 +142,53 @@ func buildStructures() {
 	}
 }
 
+func (f *FoodSource) collectFood() {
+	for _, worker := range f.Workers {
+		if worker.MovingTime < movingTimeToSource {
+			worker.MovingTime++
+			continue
+		}
+		if worker.CollectTime < foodCollectTime {
+			worker.CollectTime++
+			continue
+		}
+		food += 10
+		f.Capacity -= 10
+		worker.CollectTime = 1
+	}
+}
+
+func (f *FoodSource) assignWorker(w *Worker) {
+	if w.ResourceType == IDLE {
+		output("Assign worker to food maker: " + f.Name)
+	}
+	w.ResourceType = FOOD
+	f.Workers = append(f.Workers, w)
+}
+
 func collectFood() {
 	// food source 0
 	if bgCount == 1 {
-		for i, worker := range idleWorkers {
-			if i >= 6 {
-				break
+		for i := 1; i <= 6; i++ {
+			if worker := idleWorkers[i]; worker != nil {
+				foodSources[0].assignWorker(worker)
+				delete(idleWorkers, i)
 			}
-			if worker.ResourceType == IDLE {
-				output("Assign worker to food maker (source 0)")
-			}
-			worker.ResourceType = FOOD
-			if worker.MovingTime < movingTimeToSource {
-				worker.MovingTime++
-				continue
-			}
-			if worker.CollectTime < foodCollectTime {
-				worker.CollectTime++
-				continue
-			}
-			food += 10
-			foodSource0 -= 10
-			worker.CollectTime = 1
 		}
 	}
 
+	// food source 1
 	if bsCount == 2 {
-		for _, worker := range idleWorkers {
-			if worker.ResourceType == IDLE {
-				output("Assign worker to food maker (source 1)")
-				worker.ResourceType = FOOD
-				continue
-			}
-
-			if worker.ResourceType == FOOD {
-				if worker.MovingTime < movingTimeToSource {
-					worker.MovingTime++
-					continue
-				}
-				if worker.CollectTime < foodCollectTime {
-					worker.CollectTime++
-					continue
-				}
-				food += 10
-				foodSource1 -= 10
-				worker.CollectTime = 1
+		for i := 7; i <= len(idleWorkers); i++ {
+			if worker := idleWorkers[i]; worker != nil {
+				foodSources[1].assignWorker(worker)
+				delete(idleWorkers, i)
 			}
 		}
+	}
+
+	for _, foodSource := range foodSources {
+		foodSource.collectFood()
 	}
 }
 
@@ -245,7 +253,7 @@ func output(msg string) {
 		(beCount+1)*4,
 		len(idleWorkers), foodMakers, woodCutters, goldMiners,
 		food, wood, gold,
-		foodSource0, foodSource1, foodSource2,
+		foodSources[0].Capacity, foodSources[1].Capacity, foodSources[2].Capacity,
 		msg)
 }
 
