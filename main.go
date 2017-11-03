@@ -11,10 +11,11 @@ const (
 	TOOL_AGE   = "tool_age"
 	BRONZE_AGE = "bronze_age"
 
-	// Resource Type
-	FOOD = "F"
-	WOOD = "W"
-	GOLD = "G"
+	// Work type
+	FOOD  = "F"
+	WOOD  = "W"
+	GOLD  = "G"
+	SCOUT = "S"
 
 	WORKER_SPAWN_TIME = 20
 )
@@ -27,19 +28,20 @@ var beCost = 30
 var bgCost, bsCost = 120, 120
 var bbCost, blCost, bmCost = 150, 150, 150
 
-var timeToFindFoodSource0 = 30
+var timeToFindFoodSource0 = 60
 var movingTimeToSource = 10
 var initialWoodCollectTime = 30
 var foodCollectTime = 25
 var woodCollectTime = 20
+var woodCollectAmount = 10
 var goldCollectTime = 25
 
 var bgCount, bsCount, bbCount, blCount, bmCount, beCount = 0, 0, 0, 0, 0, 0
 
 type Worker struct {
-	MovingTime   int
-	CollectTime  int
-	ResourceType string // F, W, G
+	MovingTime  int
+	CollectTime int
+	Work        string // F, W, G, S, IDLE
 }
 
 type TownCenter struct {
@@ -48,9 +50,9 @@ type TownCenter struct {
 }
 
 type FoodSource struct {
-	Name     string
-	Workers  []*Worker
-	Capacity int
+	Name    string
+	Workers []*Worker
+	Amount  int
 }
 
 type WoodSource struct {
@@ -58,24 +60,24 @@ type WoodSource struct {
 }
 
 var currentTime = 0
-var idleWorkers map[int]*Worker
+var workers []*Worker
 var town *TownCenter
 var food, wood, gold = 200, 200, 0
 var foodSources []*FoodSource
-var wooSource *WoodSource
+var woodSource *WoodSource
 
 func init() {
 	// Start game with 3 workers
 	town = new(TownCenter)
-	idleWorkers = map[int]*Worker{
-		1: {}, 2: {}, 3: {},
+	workers = []*Worker{
+		{}, {}, {},
 	}
 	foodSources = []*FoodSource{
-		{Capacity: 900, Name: "Food 0"},
-		{Capacity: 600, Name: "Food 1"},
-		{Capacity: 750, Name: "Food 2"},
+		{Amount: 900, Name: "Food 0"},
+		{Amount: 600, Name: "Food 1"},
+		{Amount: 750, Name: "Food 2"},
 	}
-	wooSource = new(WoodSource)
+	woodSource = new(WoodSource)
 }
 
 func main() {
@@ -90,16 +92,20 @@ func main() {
 }
 
 func (t *TownCenter) spawnWorkers() {
-	if len(idleWorkers) == maxWorkers {
+	if len(workers) == maxWorkers {
 		return
 	}
 
 	if t.BuildType == WORKER {
 		if t.BuildTime == WORKER_SPAWN_TIME {
-			idleWorkers[len(idleWorkers)+1] = &Worker{}
+			workers = append(workers, &Worker{})
 			t.BuildTime = 1
 			t.BuildType = IDLE
 			output("Worker spawned.")
+			if len(workers) == 7 {
+				workers[6].Work = SCOUT
+				output("Assigned worker to scout.")
+			}
 		} else {
 			t.BuildTime++
 		}
@@ -114,7 +120,7 @@ func (t *TownCenter) spawnWorkers() {
 }
 
 func buildStructures() {
-	if (beCount+1)*4 <= len(idleWorkers)+2 {
+	if (beCount+1)*4 <= len(workers)+2 {
 		output("BE built.")
 		wood -= beCost
 		beCount++
@@ -153,36 +159,32 @@ func (f *FoodSource) collectFood() {
 			continue
 		}
 		food += 10
-		f.Capacity -= 10
+		f.Amount -= 10
 		worker.CollectTime = 1
 	}
 }
 
 func (f *FoodSource) assignWorker(w *Worker) {
-	if w.ResourceType == IDLE {
-		output("Assign worker to food maker: " + f.Name)
-	}
-	w.ResourceType = FOOD
+	w.Work = FOOD
 	f.Workers = append(f.Workers, w)
+	output("Assigned worker to food maker: " + f.Name)
 }
 
 func collectFood() {
 	// food source 0
 	if bgCount == 1 {
-		for i := 1; i <= 6; i++ {
-			if worker := idleWorkers[i]; worker != nil {
+		for i, worker := range workers {
+			if i < 6 && worker.Work == IDLE {
 				foodSources[0].assignWorker(worker)
-				delete(idleWorkers, i)
 			}
 		}
 	}
 
 	// food source 1
 	if bsCount == 2 {
-		for i := 7; i <= len(idleWorkers); i++ {
-			if worker := idleWorkers[i]; worker != nil {
+		for i, worker := range workers {
+			if i >= 7 && worker.Work == IDLE {
 				foodSources[1].assignWorker(worker)
-				delete(idleWorkers, i)
 			}
 		}
 	}
@@ -192,48 +194,45 @@ func collectFood() {
 	}
 }
 
-func collectWood() {
-	// Collecting initial woods without BS
-	if bsCount == 0 {
-		for i, worker := range idleWorkers {
-			if i < 7 {
-				continue
-			}
-			if worker.ResourceType == IDLE {
-				output("Assign worker to wood cutter")
-			}
-			worker.ResourceType = WOOD
-			if worker.CollectTime < initialWoodCollectTime {
-				worker.CollectTime++
-				continue
-			}
-			wood += 10
-			worker.CollectTime = 1
+func (ws *WoodSource) assignWorker(w *Worker) {
+	w.Work = WOOD
+	ws.Workers = append(ws.Workers, w)
+	output("Assigned worker to wood cutter")
+}
+
+func (ws *WoodSource) adjustWorkers() {
+	for len(ws.Workers) > 6 {
+		var w *Worker
+		w, ws.Workers = ws.Workers[0], ws.Workers[1:]
+		w.Work = IDLE
+		output("Change wood cutter to idle")
+	}
+}
+
+func (ws *WoodSource) collectWood(collectTime int) {
+	for _, worker := range ws.Workers {
+		if worker.CollectTime < collectTime {
+			worker.CollectTime++
+			continue
 		}
+		wood += woodCollectAmount
+		worker.CollectTime = 1
+	}
+}
+
+func collectWood() {
+	if bsCount == 0 {
+		// Collecting initial woods without BS
+		for i, worker := range workers {
+			if i >= 7 && worker.Work == IDLE {
+				woodSource.assignWorker(worker)
+			}
+		}
+		woodSource.collectWood(initialWoodCollectTime)
 	} else {
 		// Collecting woods with BS
-		if bsCount == 0 {
-			return
-		}
-		for i, worker := range idleWorkers {
-			if i < 7 || i > 12 {
-				if i != 7 && worker.ResourceType == WOOD {
-					worker.ResourceType = IDLE
-					output("Change wood cutter to idle")
-				}
-				continue
-			}
-			if worker.ResourceType == IDLE {
-				output("Assign worker to wood cutter")
-			}
-			worker.ResourceType = WOOD
-			if worker.CollectTime < woodCollectTime {
-				worker.CollectTime++
-				continue
-			}
-			wood += 10
-			worker.CollectTime = 1
-		}
+		woodSource.adjustWorkers()
+		woodSource.collectWood(woodCollectTime)
 	}
 }
 
@@ -245,27 +244,29 @@ func advanceAge() {
 }
 
 func output(msg string) {
-	foodMakers, woodCutters, goldMiners := countWorkers()
+	foodMakers, woodCutters, goldMiners, scout := countWorkers()
 	minute := currentTime / 60
 	second := currentTime % 60
-	fmt.Printf("[%02d:%02d] [BE:%2d] [W:%2d FM:%2d WC:%2d GM:%2d] [F:%3d W:%3d G:%3d] [F0:%3d F1:%3d F2:%3d]. Msg: %s\n",
+	fmt.Printf("[%02d:%02d] [Pop:%2d/%2d] [FM:%2d WC:%2d GM:%2d S:%d] [F:%3d W:%3d G:%3d] [F0:%3d F1:%3d F2:%3d]. Msg: %s\n",
 		minute, second,
-		(beCount+1)*4,
-		len(idleWorkers), foodMakers, woodCutters, goldMiners,
+		len(workers), (beCount+1)*4,
+		foodMakers, woodCutters, goldMiners, scout,
 		food, wood, gold,
-		foodSources[0].Capacity, foodSources[1].Capacity, foodSources[2].Capacity,
+		foodSources[0].Amount, foodSources[1].Amount, foodSources[2].Amount,
 		msg)
 }
 
-func countWorkers() (foodMakers, woodCutters, goldMiners int) {
-	for _, worker := range idleWorkers {
-		switch worker.ResourceType {
+func countWorkers() (foodMakers, woodCutters, goldMiners, scout int) {
+	for _, worker := range workers {
+		switch worker.Work {
 		case FOOD:
 			foodMakers++
 		case WOOD:
 			woodCutters++
 		case GOLD:
 			goldMiners++
+		case SCOUT:
+			scout++
 		}
 	}
 	return
