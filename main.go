@@ -6,10 +6,11 @@ import (
 
 const (
 	// Build Type
-	IDLE       = ""
-	WORKER     = "worker"
-	TOOL_AGE   = "tool_age"
-	BRONZE_AGE = "bronze_age"
+	IDLE        = ""
+	WORKER      = "worker"
+	TOOL_AGE    = "tool_age"
+	BRONZE_AGE  = "bronze_age"
+	DEFAULT_AGE = "default_age"
 
 	// Work type
 	FOOD  = "F"
@@ -37,6 +38,9 @@ var woodCollectAmount = 10
 var goldCollectTime = 25
 
 var bgCount, bsCount, bbCount, blCount, bmCount, beCount = 0, 0, 0, 0, 0, 0
+
+var currentAge = DEFAULT_AGE
+var timeToBronzeAge, timeToToolAge = 120, 140
 
 type Worker struct {
 	MovingTime  int
@@ -146,10 +150,46 @@ func buildStructures() {
 		wood -= bsCost
 		bsCount++
 	}
+
+	if bsCount == 2 && wood > 120 && countIdleWorkers() >= 6 {
+		output("Third BS built.")
+		wood -= bsCost
+		bsCount++
+	}
+
+	if town.BuildType == BRONZE_AGE && bbCount == 0 {
+		output("First BB built.")
+		wood -= bbCost
+		bbCount++
+	}
+
+	if currentAge == BRONZE_AGE {
+		if blCount == 0 {
+			output("First BL built.")
+			wood -= blCost
+			blCount++
+		}
+		if bmCount == 0 {
+			output("BM built.")
+			wood -= bmCost
+			bmCount++
+		}
+	}
 }
 
 func (f *FoodSource) collectFood() {
+	if f.Amount <= 0 {
+		for _, worker := range f.Workers {
+			worker.Work = IDLE
+			worker.MovingTime = 0
+		}
+		f.Workers = []*Worker{}
+		return
+	}
 	for _, worker := range f.Workers {
+		if f.Amount <= 0 {
+			break
+		}
 		if worker.MovingTime < movingTimeToSource {
 			worker.MovingTime++
 			continue
@@ -172,7 +212,7 @@ func (f *FoodSource) assignWorker(w *Worker) {
 
 func collectFood() {
 	// food source 0
-	if bgCount == 1 {
+	if bgCount == 1 && foodSources[0].Amount > 0 {
 		for i, worker := range workers {
 			if i < 6 && worker.Work == IDLE {
 				foodSources[0].assignWorker(worker)
@@ -181,10 +221,19 @@ func collectFood() {
 	}
 
 	// food source 1
-	if bsCount == 2 {
+	if bsCount == 2 && foodSources[1].Amount > 0 {
 		for i, worker := range workers {
 			if i >= 7 && worker.Work == IDLE {
 				foodSources[1].assignWorker(worker)
+			}
+		}
+	}
+
+	// food source 2
+	if bsCount == 3 && foodSources[2].Amount > 0 {
+		for _, worker := range workers {
+			if worker.Work == IDLE || worker.Work == SCOUT {
+				foodSources[2].assignWorker(worker)
 			}
 		}
 	}
@@ -237,10 +286,44 @@ func collectWood() {
 }
 
 func advanceAge() {
-	if food >= 500 {
+	if town.BuildType == IDLE && currentAge == DEFAULT_AGE && food >= 500 {
 		output("Advance to Bronze age")
 		food -= 500
+		town.BuildType = BRONZE_AGE
+		town.BuildTime = 1
+		return
 	}
+
+	if town.BuildType == BRONZE_AGE {
+		if town.BuildTime < timeToBronzeAge {
+			town.BuildTime++
+			return
+		}
+		currentAge = BRONZE_AGE
+		town.BuildType = IDLE
+		output("Bronze age done")
+		return
+	}
+
+	if town.BuildType == IDLE && currentAge == BRONZE_AGE && food >= 800 && blCount >= 1 && bmCount >= 1 {
+		output("Advance to Bronze age")
+		food -= 800
+		town.BuildType = TOOL_AGE
+		town.BuildTime = 1
+		return
+	}
+
+	if town.BuildType == TOOL_AGE {
+		if town.BuildTime < timeToToolAge {
+			town.BuildTime++
+			return
+		}
+		currentAge = TOOL_AGE
+		town.BuildType = IDLE
+		output("Tool age done")
+		return
+	}
+
 }
 
 func output(msg string) {
@@ -270,4 +353,14 @@ func countWorkers() (foodMakers, woodCutters, goldMiners, scout int) {
 		}
 	}
 	return
+}
+
+func countIdleWorkers() int {
+	count := 0
+	for _, worker := range workers {
+		if worker.Work == IDLE {
+			count++
+		}
+	}
+	return count
 }
